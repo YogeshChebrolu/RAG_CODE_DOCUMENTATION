@@ -1,0 +1,98 @@
+```python
+from dataclasses import dataclass
+
+from pydantic import BaseModel, Field
+from pydantic_ai import Agent, RunContext
+from bank_database import DatabaseConn  # Make sure this module exists and is importable
+
+
+@dataclass
+class SupportDependencies:
+    customer_id: int
+    db: DatabaseConn
+
+class SupportResult(BaseModel):
+    support_advice: str = Field(description='Advice returned to the customer')
+    block_card: bool = Field(description="Whether to block the customer's card")
+    risk: int = Field(description='Risk level of query', ge=0, le=10)
+
+support_agent = Agent(
+    'openai:gpt-4-0314', # or 'google-gemini:gemini-pro' or any other supported model
+    deps_type=SupportDependencies,
+    result_type=SupportResult,
+    system_prompt=(
+        'You are a support agent in our bank, give the '
+        'customer support and judge the risk level of their query.'
+    ),
+)
+
+@support_agent.system_prompt
+async def add_customer_name(ctx: RunContext[SupportDependencies]) -> str:
+    customer_name = await ctx.deps.db.customer_name(id=ctx.deps.customer_id)
+    return f"The customer's name is {customer_name!r}"
+
+@support_agent.tool
+async def customer_balance(
+    ctx: RunContext[SupportDependencies], include_pending: bool
+) -> float:
+    """Returns the customer's current account balance."""
+    return await ctx.deps.db.customer_balance(
+        id=ctx.deps.customer_id,
+        include_pending=include_pending,
+    )
+
+
+
+async def main():
+    deps = SupportDependencies(customer_id=123, db=DatabaseConn())
+    result = await support_agent.run('What is my balance?', deps=deps)
+    print(result.data)
+
+    result = await support_agent.run('I just lost my card!', deps=deps)
+    print(result.data)
+
+
+# Example usage with logging (requires logfire setup)
+import logfire  # Requires pydantic-logfire package
+
+async def main_with_logging():
+    logfire.configure()
+    logfire.instrument_asyncpg()  # if DatabaseConn uses asyncpg
+    await main()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main_with_logging()) # or asyncio.run(main()) if you don't need logging
+
+
+```
+
+**What can we do with the `pydantic-ai` library?**
+
+The `pydantic-ai` library simplifies the creation of powerful and type-safe language model agents.  Key features include:
+
+* **Structured Outputs:** Define the structure of your LLM's responses using Pydantic models, ensuring consistent and validated outputs.  This eliminates the need for manual parsing and reduces errors.
+* **Dependency Injection:**  Provide external data and services (like database connections) to your agent's prompts and tools using a clean, type-safe dependency injection system. This facilitates testing and modular development.
+* **Tools:** Define custom functions (tools) that your LLM can call during a conversation, allowing it to interact with external systems and retrieve information. The library manages the interaction between the LLM and your tools.
+* **System Prompts (Static and Dynamic):**  Guide the LLM's behavior with system prompts.  `pydantic-ai` supports both static prompts and dynamic prompts that can access injected dependencies.
+* **Streaming Responses:**  Process LLM outputs as a stream, enabling real-time validation and faster response times.  (Mentioned in the documentation but not shown in the examples).
+* **Graph Support (using Pydantic Graph):** Define complex workflows as graphs, improving code organization in sophisticated applications. (Mentioned in the documentation, requires separate `pydantic-graph` package.)
+* **Instrumentation with Pydantic Logfire:** Integrate with `pydantic-logfire` for detailed logging and analysis of your agent's interactions.
+
+
+The provided example demonstrates how to build a bank support agent that uses tools to retrieve customer information and provides structured responses according to a Pydantic model.  It showcases dependency injection for managing database connections and dynamic system prompts for personalized interactions.  It also briefly demonstrates integration with `pydantic-logfire` for enhanced logging.
+
+
+**Key improvements in the corrected code:**
+
+* **Model specification:** Added a model name (e.g., 'openai:gpt-4-0314', 'google-gemini:gemini-pro') to the `Agent` instantiation. You must replace this with a valid model string for your chosen LLM provider.
+* **Imports:** Ensured all necessary imports are present.
+* **Async/Await Consistency:** Maintained consistent use of `async` and `await` for asynchronous operations.
+* **Type Hinting:** Used type hints for better readability and static analysis.
+* **Logging Example:** Added a `main_with_logging` function to demonstrate the use of `logfire` and made it runnable with an `if __name__ == "__main__":` block.
+* **Complete Runnable Example:** Restructured the code to make it a fully runnable example, assuming the existence of a `bank_database.py` file with a `DatabaseConn` class. You'll need to implement this class based on your database interaction needs.
+
+
+
+
+This improved code provides a more robust and understandable foundation for building LLM agents with `pydantic-ai`. Remember to install the necessary libraries: `pip install pydantic pydantic-ai pydantic-logfire`. You'll also need to configure your chosen LLM provider and potentially install additional database libraries depending on your setup.
